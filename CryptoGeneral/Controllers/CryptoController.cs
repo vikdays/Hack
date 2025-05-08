@@ -136,57 +136,34 @@ public class CryptoController : ControllerBase
         }
     }
     
-    [HttpPost("crack-whole-system")]
-    public ActionResult<string> CrackWholeSystem([FromBody] MergeEncodeDto input)
+    [HttpPost]
+    [Route("break-system")]
+    public IActionResult BreakSystem([FromBody] MergeEncodeDto request)
     {
-        try
+        var desEncrypted = _desService.Encrypt(request.Message, request.DesKey);
+        
+        var rsaEncrypted = _rsaService.RsaEncrypt(desEncrypted, request.n, request.e);
+        
+        var hackedDes = _rsaService.RsaHack(rsaEncrypted, request.n, request.e);
+        
+        var hackedDesKey = _desService.BruteForceDecrypt(hackedDes, request.KnownPlaintext);
+
+        if (hackedDesKey == "Key not found")
         {
-            // Шаг 1: DES шифрование
-            string desCipher = _desService.Encrypt(input.Message, input.DesKey);
-
-            // Шаг 2: RSA шифрование
-            int p = 17, q = 23;
-            int n = p * q;
-            int fi = (p - 1) * (q - 1);
-            int e = 3;
-            string rsaEncrypted = _rsaService.RsaEncrypt(desCipher, n, e);
-
-            // Шаг 3: MD5 хэш
-            string md5Hash = _md5Service.GetHash(rsaEncrypted);
-
-            // Шаг 4: Взлом DES
-            string crackedDesKey = _desService.BruteForceDecrypt(desCipher, input.Message);
-            if (crackedDesKey == "Key not found")
-                return NotFound(new { Error = "DES-ключ не найден при brute-force." });
-
-            // Шаг 5: Взлом RSA
-            string hackedDesCipher = _rsaService.RsaHack(rsaEncrypted, n, e);
-
-            // Шаг 6: Дешифровка DES
-            string recoveredPlaintext = _desService.Decrypt(hackedDesCipher, crackedDesKey);
-
-            // Шаг 7: Проверка MD5
-            string recalculatedHash = _md5Service.GetHash(rsaEncrypted);
-            bool hashesMatch = md5Hash == recalculatedHash;
-
-            return Ok(new
-            {
-                OriginalMessage = input.Message,
-                DesKeyUsed = input.DesKey,
-                CrackedDesKey = crackedDesKey,
-                RsaEncrypted = rsaEncrypted,
-                RsaBrokenDesOutput = hackedDesCipher,
-                FinalDecryptedMessage = recoveredPlaintext.Trim(),
-                OriginalMd5 = md5Hash,
-                RecalculatedMd5 = recalculatedHash,
-                HashesMatch = hashesMatch,
-                SystemBroken = recoveredPlaintext.Trim() == input.Message && hashesMatch
-            });
+            return BadRequest("Не удалось подобрать DES ключ.");
         }
-        catch (Exception ex)
+
+        var originalMessage = _desService.Decrypt(hackedDes, hackedDesKey);
+
+        return Ok(new
         {
-            return StatusCode(500, new { Error = ex.Message });
-        }
+            Original = request.Message,
+            DesEncrypted = desEncrypted,
+            RsaEncrypted = rsaEncrypted,
+            RsaHacked = hackedDes,
+            DesKeyRecovered = hackedDesKey,
+            MessageDecrypted = originalMessage
+        });
     }
     
 }
